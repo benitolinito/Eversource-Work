@@ -1,4 +1,4 @@
-# Eversource-Work (DALI App outside code sample)
+# Eversource Work (DALI App outside code sample)
 
 ## Eversource User Statistics Page
 
