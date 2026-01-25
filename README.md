@@ -2,7 +2,9 @@
 
 ## Eversource User Statistics Page
 
-I was tasked with creating a user statistics page to help Evergreen project managers track student work and progress creating dialogue training data on Eversource (a fullstack Flask web app that will store LLM training data for the Evergreen generative chatbot model).
+The code sample can be found in the 'user_statistics.html' file of this repo.
+
+I was tasked with creating a user statistics page to help Evergreen project managers track student work and progress creating dialogue training data on Eversource (a fullstack Flask web app that will store LLM training data for the Evergreen generative chatbot model). 
 
 ### Features:
 1. User table that tracks:
