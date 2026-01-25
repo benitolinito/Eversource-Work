@@ -34,7 +34,8 @@ Note: I did use AI to help generate code for the HTML and UI elements. Our team 
 
 ## Screenshots
 
-<img src="Graph stats.png">
 <img src="statistics dashboard.png">
-<img src="team performance.png">
 <img src="user table.png">
+<img src="Graph stats.png">
+<img src="team performance.png">
+
