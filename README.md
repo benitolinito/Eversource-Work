@@ -29,3 +29,12 @@ I was tasked with creating a user statistics page to help Evergreen project mana
 
 
 Note: I did use AI to help generate code for the HTML and UI elements. Our team valued speed and efficiency, and this allowed us to push updates out faster. However, I primarily used it to understand our project structure/design/layout, formatting code, understanding javascript, and debugging.
+
+
+
+## Screenshots
+
+<img src="Graph stats.png">
+<img src="statistics dashboard.png">
+<img src="team performance.png">
+<img src="user table.png">
