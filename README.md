@@ -53,9 +53,9 @@ The main additions since my previous code sample are related to the Pipeline tab
 ## Learning:
 
 - I gained more experience connecting backend data to the frontend by adding Flask route logic, Jinja context data, and designing algorithms to calculate statistics.
-- I learned more about working within an existing codebase and making new features fit the project's structure, design patterns, and admin workflows.
-- I gained more experience with SQLAlchemy aggregation, Chart.js graph data, version-based filtering, and dialogue pipeline calculations.
-- I continued collaborating with my team to understand project manager needs and improve the statistics page based on those workflows.
+- Learned more about working within an existing codebase and making new features fit the project's structure, design patterns, and admin workflows.
+- Gained more experience with SQLAlchemy aggregation, Chart.js graph data, version-based filtering, and dialogue pipeline calculations.
+- Continued collaborating with my team to understand project manager needs and improve the statistics page based on those workflows.
 
 Note: I did use AI to help generate code for the HTML and UI elements in 'stats_dashboard.html'. Our team valued speed and efficiency, and this allowed us to push updates out faster. I primarily used it to understand our project structure/design/layout, formatting code, understanding javascript, and debugging. I also used it to help optimize the calculation of averages since we were querying over a database with >2500 dialogue entries.
 
