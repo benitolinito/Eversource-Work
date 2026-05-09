@@ -1,0 +1,874 @@
+{% extends "base.html" %}
+{% block title %}Statistics {% endblock %}
+
+{% block head %}
+{{ super() }}
+<link rel="stylesheet" href="{{ url_for('static', filename='css/stats_dashboard.css') }}">
+{% endblock %}
+
+{% macro render_team_select(name, current, teams, classes="form-select") -%}
+<select name="{{ name }}" class="{{ classes }}">
+  <option value="all" {% if current =="all" %}selected{% endif %}>All Teams</option>
+  {% for team in teams %}
+    <option value="{{ team }}" {% if current==team %}selected{% endif %}>{{ team }}</option>
+  {% endfor %}
+</select>
+{%- endmacro %}
+
+{% macro render_month_select(name, current, month_options, classes="form-select") -%}
+<select name="{{ name }}" class="{{ classes }}">
+  <option value="all" {% if current =="all" %}selected{% endif %}>All Months</option>
+  {% for value, label in month_options %}
+    <option value="{{ value }}" {% if current==value %}selected{% endif %}>{{ label }}</option>
+  {% endfor %}
+</select>
+{%- endmacro %}
+
+{% macro render_week_select(name, current, week_options, classes="form-select") -%}
+<select name="{{ name }}" class="{{ classes }}">
+  <option value="all" {% if current =="all" %}selected{% endif %}>All Weeks</option>
+  {% for value in week_options %}
+    <option value="{{ value }}" {% if current==value %}selected{% endif %}>Week {{ value }}</option>
+  {% endfor %}
+</select>
+{%- endmacro %}
+
+{% macro quality_section(title, overall, labels, values, bar_class) -%}
+<div class="col-md-6">
+  <div class="panel h-100">
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <h6 class="mb-0 text-muted">{{ title }}</h6>
+      <span class="badge bg-light text-dark border">{{ overall|round(1) }}% overall</span>
+    </div>
+    {% for label in labels %}
+      <div class="mb-2">
+        <div class="d-flex justify-content-between small text-muted">
+          <span>{{ label }}</span>
+          <span>{{ values[loop.index0] }}%</span>
+        </div>
+        <div class="progress" style="height: 8px;">
+          <div class="progress-bar {{ bar_class }}" role="progressbar"
+               data-progress-width="{{ values[loop.index0] }}"></div>
+        </div>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+{%- endmacro %}
+
+{% macro pf2_sidebar_card(version, label, value) -%}
+<div class="pf2-sidebar-card pf2-sidebar-card--{{ version }}">
+  <div class="pf2-sidebar-label">{{ label }}</div>
+  <div class="pf2-sidebar-value">{{ value }}</div>
+  <small class="text-muted d-block mt-1">Only dialogues with 2 reviews</small>
+</div>
+{%- endmacro %}
+
+{% block content %}
+<div class="page-shell">
+  <div class="mb-4">
+    <h1 class="page-title">Statistics</h1>
+    <p class="page-subtitle">Review activity, quality signals, and pipeline trends.</p>
+  </div>
+  <div class="grid cols-3 mb-4">
+    <div class="kpi shadow-sm">
+      <p>Total Reviews</p>
+      <h1>{{ totals.total_reviews }}</h1>
+      <small class="text-success">QA throughput</small>
+    </div>
+    <div class="kpi shadow-sm">
+      <p>V1/Unique Dialogues Created</p>
+      <h1>{{ (pipeline_flow.v1_completed|default(0)) + (pipeline_flow.in_progress|default(0)) }}</h1>
+      <small class="text-primary">Authoring volume</small>
+    </div>
+    <div class="kpi shadow-sm">
+      <p>Active Teams</p>
+      <h1>{{ totals.team_count }}</h1>
+      <small class="text-info">Collaboration spread</small>
+    </div>
+  </div>
+
+  <div class="d-flex gap-2 flex-wrap mb-4">
+    <button class="tab-btn{% if initial_tab == 'users' %} active{% endif %}" data-tab="tab-users">Users</button>
+    <button class="tab-btn{% if initial_tab == 'teams' %} active{% endif %}" data-tab="tab-teams">Teams</button>
+    <button class="tab-btn{% if initial_tab == 'timeline' %} active{% endif %}" data-tab="tab-timeline">Timeline</button>
+    <button class="tab-btn{% if initial_tab == 'quality' %} active{% endif %}" data-tab="tab-quality">Quality</button>
+    <button class="tab-btn{% if initial_tab == 'pipeline' %} active{% endif %}" data-tab="tab-pipeline">Pipeline</button>
+    {% if user.is_admin() %}
+    <button class="tab-btn{% if initial_tab == 'settings' %} active{% endif %}" data-tab="tab-settings">Settings</button>
+    {% endif %}
+  </div>
+
+  <!-- Users Tab -->
+  <div class="p-3 mb-4 tab" id="tab-users" data-active>
+    <div class="panel mb-3 shadow-sm">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-3">
+        <div>
+          <h4 class="mb-1">Dialogue & Review Leaders</h4>
+          <small class="text-muted">Filter by name, team, or date range.</small>
+        </div>
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('main.admin_user_statistics', tab='users') }}">Clear</a>
+      </div>
+      <form method="GET" action="{{ url_for('main.admin_user_statistics') }}" class="row g-3 mt-3">
+        <input type="hidden" name="tab" value="users" />
+        <div class="col-md-3">{{ form.name.label(class="form-label text-muted") }}{{ form.name(class="form-control", placeholder="Search name") }}</div>
+        <div class="col-md-3">{{ form.team.label(class="form-label text-muted") }}{{ form.team(class="form-select") }}</div>
+        <div class="col-md-2">{{ form.version.label(class="form-label text-muted") }}{{ form.version(class="form-select") }}</div>
+        <div class="col-md-3">{{ form.start_date.label(class="form-label text-muted") }}{{ form.start_date(class="form-control", placeholder="Start") }}{{ form.end_date(class="form-control mt-2", placeholder="End") }}</div>
+        <div class="col-md-1 d-flex align-items-end">{{ form.submit(class="btn btn-success w-100") }}</div>
+      </form>
+    </div>
+
+    <div class="panel shadow-sm">
+      {% if user_stats %}
+      <div class="table-responsive" style="max-height: 520px; overflow-y: auto;">
+        <table class="table table-striped align-middle mb-0">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th class="text-center">Team</th>
+              <th class="text-center">Created</th>
+              <th class="text-center">Edited</th>
+              <th class="text-center">Reviews</th>
+              <th class="text-center">Avg Rated</th>
+              <th class="text-center">Avg Received Latest</th>
+              <th class="text-center">Avg Received All</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for stat in user_stats %}
+            <tr>
+              <td>
+                <div class="fw-semibold">{{ stat.username }}</div>
+                <div class="text-muted small">{{ stat.email }}</div>
+              </td>
+              <td class="text-center">{{ stat.team | default('-') }}</td>
+              <td class="text-center">{{ stat.dialogues_created }}</td>
+              <td class="text-center">{{ stat.dialogues_edited }}</td>
+              <td class="text-center">{{ stat.reviews_done }}</td>
+              <td class="text-center">{% if stat.avg_rated_reviews_display is not none %}{{ '%.2f'|format(stat.avg_rated_reviews_display) }}{% else %}-{% endif %}</td>
+              <td class="text-center">{% if stat.avg_rating_received_display is not none %}{{ '%.2f'|format(stat.avg_rating_received_display) }}{% else %}-{% endif %}</td>
+              <td class="text-center">{% if stat.avg_rating_received_all_display is not none %}{{ '%.2f'|format(stat.avg_rating_received_all_display) }}{% else %}-{% endif %}</td>
+              <td class="text-end">
+                <div class="btn-group btn-group-sm">
+                  <button class="btn btn-outline-success user-stats-action" data-user-id="{{ stat.user_id }}" data-user-name="{{ stat.username }}" data-mode="dialogues">Dialogues</button>
+                  <button class="btn btn-outline-primary user-stats-action" data-user-id="{{ stat.user_id }}" data-user-name="{{ stat.username }}" data-mode="reviews">Reviews</button>
+                  <button class="btn btn-outline-info user-stats-action" data-user-id="{{ stat.user_id }}" data-user-name="{{ stat.username }}" data-mode="graph">Trend</button>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if users_pages > 1 %}
+      <div class="adm-pagination mt-3">
+        <div class="adm-page-info">Page {{ users_page }} of {{ users_pages }}</div>
+        <div class="adm-page-btns">
+          <a class="adm-page-btn {% if users_page <= 1 %}disabled{% endif %}"
+             {% if users_page > 1 %}href="{{ users_page_url(users_page - 1) }}"{% endif %}>
+            ← Prev
+          </a>
+          {% set start_page = [1, users_page - 3]|max %}
+          {% set end_page = [users_pages, start_page + 6]|min %}
+          {% for p in range(start_page, end_page + 1) %}
+          <a class="adm-page-btn {% if p == users_page %}active{% endif %}"
+             href="{{ users_page_url(p) }}">
+            {{ p }}
+          </a>
+          {% endfor %}
+          <a class="adm-page-btn {% if users_page >= users_pages %}disabled{% endif %}"
+             {% if users_page < users_pages %}href="{{ users_page_url(users_page + 1) }}"{% endif %}>
+            Next →
+          </a>
+        </div>
+      </div>
+      {% endif %}
+      {% else %}
+      <p class="text-muted mb-0">No user statistics found for the selected filters.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <!-- Teams Tab -->
+  <div class="p-3 mb-4 tab" id="tab-teams">
+    <div class="panel shadow-sm">
+      <div class="d-flex align-items-start flex-wrap gap-2 mb-3">
+        <div>
+          <h4 class="mb-1">Team Performance</h4>
+          <small class="text-muted">Dialogues, reviews, and average ratings by team.</small>
+        </div>
+        <form method="GET" action="{{ url_for('main.admin_user_statistics') }}" class="d-flex gap-2 flex-wrap ms-auto">
+          <input type="hidden" name="tab" value="graphs" />
+          <input type="hidden" name="graph_view" value="teams" />
+          {{ render_team_select('team', summary_team, teams, 'form-select') }}
+          {{ render_month_select('month', month_raw, month_options, 'form-select') }}
+          {{ render_week_select('week', week_raw, week_options, 'form-select') }}
+          <button class="btn btn-outline-primary" type="submit">Filter</button>
+        </form>
+      </div>
+      <div class="chart-wrap"><canvas id="teamSummaryChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Timeline Tab -->
+  <div class="p-3 mb-4 tab" id="tab-timeline">
+    <div class="panel shadow-sm">
+      <div class="d-flex align-items-start flex-wrap gap-2 mb-3">
+        <div>
+          <h4 class="mb-1">Timeline Performance</h4>
+          <small class="text-muted">Dialogues and reviews over time; filter by team/date.</small>
+        </div>
+        <form method="GET" action="{{ url_for('main.admin_user_statistics') }}" class="d-flex gap-2 flex-wrap ms-auto">
+          <input type="hidden" name="tab" value="graphs" />
+          <input type="hidden" name="graph_view" value="timeline" />
+          {{ render_team_select('timeline_team', timeline_team, teams, 'form-select') }}
+          {{ render_month_select('timeline_month', timeline_month_raw, month_options, 'form-select') }}
+          {{ render_week_select('timeline_week', timeline_week_raw, week_options, 'form-select') }}
+          <button class="btn btn-outline-primary" type="submit">Filter</button>
+        </form>
+      </div>
+      <div class="chart-wrap"><canvas id="timelineChart"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Quality Tab -->
+  <div class="p-3 mb-4 tab" id="tab-quality">
+    <div class="panel shadow-sm">
+      <div class="d-flex align-items-start flex-wrap gap-2 mb-3">
+        <div>
+          <h4 class="mb-1">Review Quality Signals</h4>
+          <small class="text-muted">Percent of reviews meeting each rubric element.</small>
+        </div>
+        <form action="{{ url_for('main.admin_user_statistics') }}" method="get" class="d-flex gap-2 flex-wrap ms-auto">
+          <input type="hidden" name="tab" value="graphs" />
+          <input type="hidden" name="graph_view" value="quality" />
+          <select name="version" class="form-select">
+            <option value="all" {% if selected_version=='all' %}selected{% endif %}>All Versions</option>
+            {% for version in review_versions %}
+            <option value="{{ version }}" {% if selected_version==version|string %}selected{% endif %}>v{{ version }}</option>
+            {% endfor %}
+          </select>
+          <button class="btn btn-outline-primary" type="submit">Apply</button>
+        </form>
+      </div>
+
+      <div class="panel shadow-sm mb-3">
+        <div class="row g-3">
+          <div class="col-6 col-md-3">
+            <div class="p-3 border rounded">
+              <div class="text-muted small">Basic</div>
+              <div class="fw-bold fs-4">{{ rev_stats.basic_elements_count|round(1) }}%</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="p-3 border rounded">
+              <div class="text-muted small">Content</div>
+              <div class="fw-bold fs-4">{{ rev_stats.content_elements_count|round(1) }}%</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="p-3 border rounded">
+              <div class="text-muted small">Tone & Engagement</div>
+              <div class="fw-bold fs-4">{{ rev_stats.tone_elements_count|round(1) }}%</div>
+            </div>
+          </div>
+          <div class="col-6 col-md-3">
+            <div class="p-3 border rounded">
+              <div class="text-muted small">Passive Sensing</div>
+              <div class="fw-bold fs-4">{{ rev_stats.ps_elements_count|round(1) }}%</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {% set quality_sections = [
+        ('Basic Requirements', rev_stats.basic_elements_count, [
+          'Length >= 100 turns',
+          'Dartmouth-specific content marked',
+          'Correct citation format',
+          'Background context follows guidelines',
+          'Terms/Weeks appropriate',
+          'No spelling/grammar errors',
+        ], rev_stats.basic_elements, 'bg-primary'),
+        ('Content Quality', rev_stats.content_elements_count, [
+          'Evidence-based support',
+          'Practical & actionable guidance',
+          'Avoids jargon & clinical terms',
+        ], rev_stats.content_elements, 'bg-success'),
+        ('Tone & Engagement', rev_stats.tone_elements_count, [
+          'Socratic questioning',
+          'Prompt & effective intervention',
+          'Dartmouth-informed experiences',
+          'Personalized responses',
+          'Natural response length',
+          'Wise upper-year student',
+        ], rev_stats.tone_elements, 'bg-info'),
+        ('Passive Sensing Context', rev_stats.ps_elements_count, [
+          'Data fits manual guidelines',
+          'Realistic quantitative values',
+          'Appropriate data sources cited',
+          'No inappropriate assumptions',
+        ], rev_stats.ps_elements, 'bg-warning'),
+      ] %}
+      <div class="row g-3">
+        {% for title, overall, labels, values, bar_class in quality_sections %}
+          {{ quality_section(title, overall, labels, values, bar_class) }}
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Pipeline Tab -->
+  <div class="p-3 mb-4 tab" id="tab-pipeline">
+    <div class="panel shadow-sm">
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+        <div>
+          <h4 class="mb-1">Dialogue Pipeline</h4>
+          <small class="text-muted">Counts by stage and version.</small>
+        </div>
+        <div class="d-flex align-items-center gap-2">
+          <div class="btn-group btn-group-sm" role="group" id="pipelineViewToggle">
+            <button type="button" class="btn btn-primary" data-pf-view="cumulative">Cumulative</button>
+            <button type="button" class="btn btn-outline-primary" data-pf-view="unique">Unique</button>
+          </div>
+          <button
+            type="button"
+            class="btn btn-link text-muted p-0"
+            data-bs-toggle="modal"
+            data-bs-target="#pipelineInfoModal"
+            aria-label="How pipeline calculations work"
+          >
+            <i class="bi bi-info-circle fs-5"></i>
+          </button>
+        </div>
+      </div>
+      <div class="row g-3 mb-4">
+        <div class="col-sm-6 col-md-3">
+          <div class="panel shadow-sm text-center p-3 h-100 d-flex flex-column justify-content-center">
+            <small class="text-muted d-block">Total Turns</small>
+            <span class="fs-4 fw-bold text-success">{{ "{:,}".format(pipeline_flow.get('total_turns', 0)) }}</span>
+          </div>
+        </div>
+        <div class="col-sm-6 col-md-3">
+          <div class="panel shadow-sm text-center p-3 h-100 d-flex flex-column justify-content-center">
+            <small class="text-muted d-block">Total Words</small>
+            <span class="fs-4 fw-bold text-success">{{ "{:,}".format(pipeline_flow.get('total_words', 0)) }}</span>
+          </div>
+        </div>
+        {% set avg_v1_str = pipeline_flow.get('avg_rating_reviewed_twice', '\u2014') %}
+        {% set avg_v2_str = pipeline_flow.get('avg_rating_v2_reviewed_twice', '\u2014') %}
+        {% if avg_v1_str != '\u2014' and avg_v2_str != '\u2014' %}
+          {% set rating_diff = (avg_v2_str|float - avg_v1_str|float)|round(2) %}
+        {% else %}
+          {% set rating_diff = none %}
+        {% endif %}
+        <div class="col-sm-6 col-md-3">
+          <div class="panel shadow-sm text-center p-3 h-100 d-flex flex-column justify-content-center">
+            <small class="text-muted">Rating Change V1 to V2 (2 reviews)</small>
+            <span class="fs-4 fw-bold {% if rating_diff is not none and rating_diff > 0 %}text-success{% elif rating_diff is not none and rating_diff < 0 %}text-danger{% else %}text-muted{% endif %}">
+              {% if rating_diff is not none %}
+                {{ '%+.2f'|format(rating_diff) }}
+              {% else %}
+                &mdash;
+              {% endif %}
+            </span>
+            <small class="text-muted">V1: {{ avg_v1_str }} &rarr; V2: {{ avg_v2_str }}</small>
+          </div>
+        </div>
+      </div>
+      {% set pf = pipeline_flow %}
+      {% set pf_total = pf.v1_completed | default(0) or 1 %}
+
+      <div class="mt-4">
+        <div class="pf2-wrapper">
+        <div class="pf2">
+          {% macro pf2_node(key, label, count, prev_count, version="v1", unique_count=0) %}
+          <div class="pf2-node pf2-node--{{ version }} pf-clickable" role="button"
+               data-pf-stage="{{ key }}" data-pf-label="{{ label }}"
+               data-pf-count="{{ count }}" data-pf-prev="{{ prev_count }}"
+               data-pf-count-unique="{{ unique_count }}"
+               data-pf-total="{{ pf_total }}">
+            <div class="pf2-node-inner">
+              <span class="pf2-label">{{ label }}</span>
+              <span class="pf2-count">{{ "{:,}".format(count) }}</span>
+            </div>
+            {% if prev_count %}
+            <span class="pf2-pct">{{ "%.1f"|format((count / prev_count * 100) if prev_count else 0) }}%</span>
+            {% else %}
+            <span class="pf2-pct" style="display:none;"></span>
+            {% endif %}
+          </div>
+          {% endmacro %}
+
+          {% macro pf2_gate(count) %}
+          <div class="pf2-gate">
+            <div class="pf2-gate-line"></div>
+            <div class="pf2-gate-badge">
+              <i class="bi bi-star-fill"></i>
+              {{ "{:,}".format(count) }} reached {{ pipeline_settings.rating_threshold }}
+            </div>
+          </div>
+          {% endmacro %}
+
+          {# ── Version 1 ── #}
+          <div class="pf2-version-label">Version 1</div>
+          {{ pf2_node('v1_completed', 'Dialogues Completed', pf.v1_completed|default(0), 0, 'v1', pf.u_v1_completed|default(0)) }}
+          <div class="pf2-line"></div>
+          {{ pf2_node('v1_review_1', 'Review 1 Completed', pf.v1_review_1|default(0), pf.v1_completed|default(0), 'v1', pf.u_v1_review_1|default(0)) }}
+          <div class="pf2-line"></div>
+          <div class="pf2-review-gate">
+            {{ pf2_node('v1_review_2', 'Review 2 Completed', pf.v1_review_2|default(0), pf.v1_review_1|default(0), 'v1', pf.u_v1_review_2|default(0)) }}
+            {{ pf2_gate(pf.v1_rating_reached|default(0)) }}
+          </div>
+          <div class="pf2-line"></div>
+          {{ pf2_node('v1_edit', 'Edit (V1) Completed', pf.v1_edit_completed|default(0), pf.v1_review_2|default(0), 'v1', pf.u_v1_edit_completed|default(0)) }}
+
+          {# ── Version 2 ── #}
+          <div class="pf2-line pf2-line--long"></div>
+          <div class="pf2-version-label">Version 2</div>
+          {{ pf2_node('v2_review_1', 'Review 1 Completed', pf.v2_review_1|default(0), pf.v1_edit_completed|default(0), 'v2', pf.u_v2_review_1|default(0)) }}
+          <div class="pf2-line"></div>
+          <div class="pf2-review-gate">
+            {{ pf2_node('v2_review_2', 'Review 2 Completed', pf.v2_review_2|default(0), pf.v2_review_1|default(0), 'v2', pf.u_v2_review_2|default(0)) }}
+            {{ pf2_gate(pf.v2_rating_reached|default(0)) }}
+          </div>
+
+          <div class="pf2-line"></div>
+          {{ pf2_node('v2_edit', 'Edit (V2) Completed', pf.v2_edit_completed|default(0), pf.v2_review_2|default(0), 'v2', pf.u_v2_edit_completed|default(0)) }}
+
+          {# ── Version 3 ── #}
+          <div class="pf2-line pf2-line--long"></div>
+          <div class="pf2-version-label">Version 3</div>
+          {{ pf2_node('v3_review_1', 'Review 1 Completed', pf.v3_review_1|default(0), pf.v2_edit_completed|default(0), 'v3', pf.u_v3_review_1|default(0)) }}
+          <div class="pf2-line"></div>
+          <div class="pf2-review-gate">
+            {{ pf2_node('v3_review_2', 'Review 2 Completed', pf.v3_review_2|default(0), pf.v3_review_1|default(0), 'v3', pf.u_v3_review_2|default(0)) }}
+            {{ pf2_gate(pf.v3_rating_reached|default(0)) }}
+          </div>
+
+          {# ── Terminal ── #}
+          <div class="pf2-line pf2-line--long"></div>
+          <div class="pf2-terminal">
+            <div class="pf2-terminal-card pf2-terminal--success pf-clickable" role="button"
+                 data-pf-stage="rating_reached" data-pf-label="{{ pipeline_settings.rating_threshold }} Rating Reached"
+                 data-pf-count="{{ pf.rating_reached|default(0) }}"
+                 data-pf-prev="{{ pf.v1_completed|default(0) }}" data-pf-total="{{ pf_total }}">
+              <i class="bi bi-check-circle-fill"></i>
+              <div>
+                <div class="pf2-terminal-label">{{ pipeline_settings.rating_threshold }} Rating Reached</div>
+                <div class="pf2-terminal-count">{{ "{:,}".format(pf.rating_reached|default(0)) }}</div>
+              </div>
+              <span class="pf2-terminal-pct">{{ pf.rating_reached_pct|default(0) }}%</span>
+            </div>
+            <div class="pf2-terminal-card pf2-terminal--danger pf-clickable" role="button"
+                 data-pf-stage="rating_not_reached" data-pf-label="{{ pipeline_settings.rating_threshold }} Rating Not Reached"
+                 data-pf-count="{{ pf.rating_not_reached|default(0) }}"
+                 data-pf-prev="{{ pf.v3_review_2|default(0) }}" data-pf-total="{{ pf_total }}">
+              <i class="bi bi-x-circle-fill"></i>
+              <div>
+                <div class="pf2-terminal-label">Not Reached</div>
+                <div class="pf2-terminal-count">{{ "{:,}".format(pf.rating_not_reached|default(0)) }}</div>
+              </div>
+              <span class="pf2-terminal-pct">{{ pf.rating_not_reached_pct|default(0) }}%</span>
+            </div>
+          </div>
+        </div>
+        <div class="pf2-sidebar">
+          {{ pf2_sidebar_card('v1', 'Avg V1 Rating', pf.avg_rating_reviewed_twice) }}
+          {{ pf2_sidebar_card('v2', 'Avg V2 Rating', pf.avg_rating_v2_reviewed_twice) }}
+          {{ pf2_sidebar_card('v3', 'Avg V3 Rating', pf.avg_rating_v3_reviewed_twice) }}
+        </div>
+        </div>
+      </div>
+
+      <!-- Pipeline Stage Detail Modal -->
+      <div class="modal fade" id="pipelineStageModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title" id="pfModalTitle"></h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+              <div class="d-flex flex-column gap-3">
+                <div class="d-flex justify-content-between align-items-center">
+                  <span class="text-muted">Count at this stage</span>
+                  <span class="fw-bold fs-5" id="pfModalCount"></span>
+                </div>
+                <div class="d-flex justify-content-between align-items-center">
+                  <span class="text-muted">% of all V1 dialogues</span>
+                  <span class="fw-semibold" id="pfModalCumPct"></span>
+                </div>
+                <div class="d-flex justify-content-between align-items-center" id="pfModalStageRow">
+                  <span class="text-muted">Conversion from previous stage</span>
+                  <span class="fw-semibold" id="pfModalStagePct"></span>
+                </div>
+                <div class="d-flex justify-content-between align-items-center" id="pfModalDropRow">
+                  <span class="text-muted">Drop-off from previous stage</span>
+                  <span class="fw-semibold text-danger" id="pfModalDrop"></span>
+                </div>
+                <hr class="my-1">
+                <div id="pfModalDesc" class="text-muted small"></div>
+                <div id="pfModalDialoguesSection" class="d-none">
+                  <a class="small text-muted" data-bs-toggle="collapse" href="#pfModalDialoguesCollapse" role="button" aria-expanded="false" aria-controls="pfModalDialoguesCollapse">
+                    <i class="bi bi-chevron-right me-1"></i>View dialogues at this stage
+                  </a>
+                  <div class="collapse mt-2" id="pfModalDialoguesCollapse">
+                    <div class="table-responsive" style="max-height:300px;overflow-y:auto;">
+                      <table class="table table-sm table-hover mb-0">
+                        <thead class="table-light">
+                          <tr>
+                            <th>ID</th>
+                            <th>Author</th>
+                            <th>Version</th>
+                            <th>Reviews</th>
+                            <th>Avg Rating</th>
+                          </tr>
+                        </thead>
+                        <tbody id="pfModalDialoguesTbody"></tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <!-- Pipeline Info Modal -->
+      <div class="modal fade" id="pipelineInfoModal" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title">Pipeline Calculations</h5>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body small">
+              <h6 class="fw-bold">Current Settings</h6>
+              <ul>
+                <li><strong>Min turns:</strong> {{ pipeline_settings.min_turns }} &mdash; dialogues with fewer turns are excluded as test/unmeaningful</li>
+                <li><strong>Min reviews required:</strong> {{ pipeline_settings.min_reviews_required }} &mdash; reviews needed before the rating threshold is checked</li>
+                <li><strong>Rating threshold:</strong> {{ pipeline_settings.rating_threshold }} &mdash; average rating needed to count as "Rating Reached"</li>
+              </ul>
+              <hr>
+              <h6 class="fw-bold">Top-level Cards</h6>
+              <ul>
+                <li><strong>Total Reviews:</strong> Count of all human peer review submissions (LLM reviews excluded). Counts across all versions (V1, V2, V3) and all dialogues regardless of turn count.</li>
+                <li><strong>V1 Dialogues Created:</strong> V1 Completed + In Progress + Test/Unmeaningful. This is every V1 dialogue in the system.</li>
+                <li><strong>Rating Change (V1 to V2):</strong> Avg V2 Rating minus Avg V1 Rating. Each dialogue's average is computed first, then those averages are averaged (per-dialogue, not per-review).</li>
+              </ul>
+              <hr>
+              <!-- Cumulative explanation (shown when cumulative toggle is active) -->
+              <div id="pipelineInfoCumulative">
+                <h6 class="fw-bold">Flowchart Stages <span class="badge bg-primary">Cumulative</span></h6>
+                <p class="text-muted mb-2">Each stage counts all dialogues that passed through it, including those that progressed further. Percentages show stage-to-stage conversion rates.</p>
+                <ul>
+                  <li><strong>Test/Unmeaningful:</strong> Dialogues (any version) with fewer than {{ pipeline_settings.min_turns }} turns or invalid content. Excluded from the pipeline entirely.</li>
+                  <li><strong>In Progress:</strong> V1 dialogues where <code>in_progress = True</code>. Not yet submitted.</li>
+                  <li><strong>Dialogue V1 Completed:</strong> Meaningful V1 dialogues that are not in progress. This is the pipeline entry point and the denominator for Cumulative Conversion.</li>
+                  <li><strong>Review 1 (V1) Completed:</strong> V1 dialogues with at least 1 review.</li>
+                  <li><strong>Review 2 (V1) Completed:</strong> V1 dialogues with at least {{ pipeline_settings.min_reviews_required }} reviews. The average rating is calculated at this point.</li>
+                  <li><strong>Rating Reached (gate):</strong> After Review 2, if a dialogue's average rating is &ge; {{ pipeline_settings.rating_threshold }}, it exits the pipeline as "Rating Reached". The family is not tracked further.</li>
+                  <li><strong>Edit (V1) Completed:</strong> V1 dialogues that did not reach {{ pipeline_settings.rating_threshold }} and have a V2 version created.</li>
+                </ul>
+                <p class="text-muted">The same pattern repeats for V2 and V3. After V3 Review 2, dialogues that still don't reach {{ pipeline_settings.rating_threshold }} are counted as "Rating Not Reached".</p>
+                <hr>
+                <h6 class="fw-bold">Table</h6>
+                <ul>
+                  <li><strong>Count:</strong> Total dialogues that reached this stage (includes those that moved on).</li>
+                  <li><strong>Cumulative Conversion:</strong> Stage count / Dialogue V1 Completed &times; 100.</li>
+                  <li><strong>Stage Conversion:</strong> Stage count / previous stage count &times; 100. Shows the drop-off between consecutive stages.</li>
+                </ul>
+              </div>
+              <!-- Unique explanation (shown when unique toggle is active) -->
+              <div id="pipelineInfoUnique" style="display:none;">
+                <h6 class="fw-bold">Flowchart Stages <span class="badge bg-primary">Unique</span></h6>
+                <p class="text-muted mb-2">Each stage counts only dialogues whose furthest progress is that stage &mdash; they have not moved beyond it. Useful for identifying where dialogues are stuck.</p>
+                <ul>
+                  <li><strong>Dialogue V1 Completed:</strong> Submitted V1 dialogues that have not received any reviews yet.</li>
+                  <li><strong>Review 1 (V1) Completed:</strong> V1 dialogues with 1 review but fewer than {{ pipeline_settings.min_reviews_required }}. Waiting for more reviews.</li>
+                  <li><strong>Review 2 (V1) Completed:</strong> V1 dialogues with {{ pipeline_settings.min_reviews_required }}+ reviews whose rating is below {{ pipeline_settings.rating_threshold }}, but no V2 has been created yet. Waiting for the author to edit.</li>
+                  <li><strong>Edit (V1) Completed:</strong> A V2 exists but has not received any reviews yet.</li>
+                </ul>
+                <p class="text-muted">The same pattern repeats for V2 and V3. Terminal stages (Rating Reached, Not Reached) are the same in both views.</p>
+                <hr>
+                <h6 class="fw-bold">How unique stage is determined</h6>
+                <p>Each dialogue family (V1 + V2 + V3 sharing the same root) is traced through the pipeline. The <strong>furthest stage</strong> it reaches is the one it counts toward. For example, a family with V1 that has 1 review and no V2 counts uniquely in "Review 1 (V1) Completed". The sum of all unique counts equals the total V1 Completed count.</p>
+                <hr>
+                <h6 class="fw-bold">Table</h6>
+                <ul>
+                  <li><strong>Count:</strong> Dialogues whose furthest progress is exactly this stage.</li>
+                  <li><strong>% of Total:</strong> Unique count / Dialogue V1 Completed &times; 100. Shows what fraction of all dialogues are at this stage.</li>
+                </ul>
+              </div>
+              <hr>
+              <h6 class="fw-bold">Average Ratings (Sidebar)</h6>
+              <ul>
+                <li><strong>Avg V1 Rating:</strong> Only V1 dialogues with 2 completed reviews are included. Each dialogue's average rating is computed, then all per-dialogue averages are averaged together. Dialogues with 0 or 1 reviews are excluded.</li>
+                <li><strong>Avg V2 Rating:</strong> Same calculation for V2 dialogues.</li>
+                <li><strong>Avg V3 Rating:</strong> Same calculation for V3 dialogues.</li>
+              </ul>
+              <hr>
+              <h6 class="fw-bold">Family Grouping</h6>
+              <p>Dialogues are grouped into families by <code>parent_dialogue_id</code>. All versions (V1, V2, V3) of the same dialogue share the same root ID. The pipeline tracks each family through its lifecycle as a single unit. A family exits the pipeline the first time it reaches the rating threshold.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {% set pf_tbl = pipeline_flow %}
+      {% set pf_tbl_total = pf_tbl.v1_completed | default(0) or 1 %}
+
+      {# ── Main pipeline table (matches spreadsheet) ── #}
+      <div class="panel shadow-sm">
+        <div class="table-responsive">
+          <table id="pipelineTable" class="table table-sm align-middle mb-0">
+            <thead class="table-light">
+              <tr>
+                <th>Stage</th>
+                <th class="text-end">Count</th>
+                <th class="text-end pf-tbl-col-cum">Cumulative Conversion</th>
+                <th class="text-end pf-tbl-col-stage">Stage Conversion</th>
+              </tr>
+            </thead>
+            {% macro pf_pct(num, denom) -%}
+              {{ "%.1f"|format((num / denom * 100) if denom else 0) }}%
+            {%- endmacro %}
+            {% macro pf_tbl_row(row_class, label_html, count, ucount, prev) -%}
+              <tr class="{{ row_class }}" data-pf-tbl-count="{{ count }}" data-pf-tbl-unique="{{ ucount }}" data-pf-tbl-prev="{{ prev }}" data-pf-tbl-total="{{ pf_tbl_total }}">
+                <td>{{ label_html|safe }}</td>
+                <td class="text-end pf-tbl-count">{{ "{:,}".format(count) }}</td>
+                <td class="text-end pf-tbl-cum">{{ pf_pct(count, pf_tbl_total) }}</td>
+                <td class="text-end pf-tbl-stage">{% if prev %}{{ pf_pct(count, prev) }}{% else %}&mdash;{% endif %}</td>
+              </tr>
+            {%- endmacro %}
+            <tbody>
+              {% set version_blocks = [
+                (
+                  [
+                    ('Dialogue V1 Completed', pf_tbl.v1_completed|default(0), 0, pf_tbl.u_v1_completed|default(0)),
+                    ('Review 1 (V1) Completed', pf_tbl.v1_review_1|default(0), pf_tbl.v1_completed|default(0), pf_tbl.u_v1_review_1|default(0)),
+                    ('Review 2 (V1) Completed', pf_tbl.v1_review_2|default(0), pf_tbl.v1_review_1|default(0), pf_tbl.u_v1_review_2|default(0)),
+                  ],
+                  pf_tbl.v1_rating_reached|default(0), 'V1', pf_tbl.v1_review_2|default(0),
+                ),
+                (
+                  [
+                    ('Edit (V1) Completed', pf_tbl.v1_edit_completed|default(0), pf_tbl.v1_review_2|default(0), pf_tbl.u_v1_edit_completed|default(0)),
+                    ('Review 1 (V2) Completed', pf_tbl.v2_review_1|default(0), pf_tbl.v1_edit_completed|default(0), pf_tbl.u_v2_review_1|default(0)),
+                    ('Review 2 (V2) Completed', pf_tbl.v2_review_2|default(0), pf_tbl.v2_review_1|default(0), pf_tbl.u_v2_review_2|default(0)),
+                  ],
+                  pf_tbl.v2_rating_reached|default(0), 'V2', pf_tbl.v2_review_2|default(0),
+                ),
+                (
+                  [
+                    ('Edit (V2) Completed', pf_tbl.v2_edit_completed|default(0), pf_tbl.v2_review_2|default(0), pf_tbl.u_v2_edit_completed|default(0)),
+                    ('Review 1 (V3) Completed', pf_tbl.v3_review_1|default(0), pf_tbl.v2_edit_completed|default(0), pf_tbl.u_v3_review_1|default(0)),
+                    ('Review 2 (V3) Completed', pf_tbl.v3_review_2|default(0), pf_tbl.v3_review_1|default(0), pf_tbl.u_v3_review_2|default(0)),
+                  ],
+                  pf_tbl.v3_rating_reached|default(0), 'V3', pf_tbl.v3_review_2|default(0),
+                ),
+              ] %}
+              {% for stages, gate_count, gate_version, gate_prev in version_blocks %}
+                {% for label, count, parent, ucount in stages %}
+                  {{ pf_tbl_row('pf-tbl-row', label, count, ucount, parent) }}
+                {% endfor %}
+                {% if gate_count %}
+                  {{ pf_tbl_row(
+                      'pf-gate-row',
+                      '<i class="bi bi-star-fill me-1"></i>' ~ pipeline_settings.rating_threshold ~ ' Reached at ' ~ gate_version,
+                      gate_count, gate_count, gate_prev
+                  ) }}
+                {% endif %}
+              {% endfor %}
+
+              {% set not_reached = pf_tbl.rating_not_reached|default(0) %}
+              {% if not_reached %}
+                {{ pf_tbl_row(
+                    'pf-notreached-row',
+                    '<i class="bi bi-x-circle-fill me-1"></i>Not Reached After V3',
+                    not_reached, not_reached, pf_tbl.v3_review_2|default(0)
+                ) }}
+              {% endif %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {# ── Additional metrics ── #}
+      <div class="row g-3 mt-2">
+        <div class="col-sm-6 col-md-3">
+          <div class="panel shadow-sm text-center p-3">
+            <small class="text-muted d-block">Test/Unmeaningful</small>
+            <span class="fs-4 fw-bold">{{ "{:,}".format(pf_tbl.test_unmeaningful|default(0)) }}</span>
+            <small class="text-muted d-block">&lt;{{ pipeline_settings.min_turns }} turns</small>
+          </div>
+        </div>
+        <div class="col-sm-6 col-md-3">
+          <div class="panel shadow-sm text-center p-3">
+            <small class="text-muted d-block">{{ pipeline_settings.rating_threshold }} Rating Reached</small>
+            <span class="fs-4 fw-bold text-success">{{ "{:,}".format(pf_tbl.rating_reached|default(0)) }}</span>
+            <small class="text-muted d-block">
+              V1: {{ pf_tbl.v1_rating_reached|default(0) }} |
+              V2: {{ pf_tbl.v2_rating_reached|default(0) }} |
+              V3: {{ pf_tbl.v3_rating_reached|default(0) }}
+            </small>
+          </div>
+        </div>
+        <div class="col-sm-6 col-md-3">
+          <div class="panel shadow-sm text-center p-3">
+            <small class="text-muted d-block">{{ pipeline_settings.rating_threshold }} Not Reached</small>
+            <span class="fs-4 fw-bold text-danger">{{ "{:,}".format(pf_tbl.rating_not_reached|default(0)) }}</span>
+            <small class="text-muted d-block">After V3 Review 2</small>
+          </div>
+        </div>
+        <div class="col-sm-6 col-md-3">
+          <div class="panel shadow-sm text-center p-3">
+            <small class="text-muted d-block">Completion Rate</small>
+            <span class="fs-4 fw-bold">{{ "%.1f"|format(pf_tbl.rating_reached_pct|default(0)) }}%</span>
+            <small class="text-muted d-block">of all V1 dialogues</small>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  {% if user.is_admin() %}
+  <!-- Settings Tab -->
+  <div class="p-3 mb-4 tab" id="tab-settings">
+    <div class="panel shadow-sm" style="max-width:520px;">
+      <h4 class="mb-1">Pipeline Settings</h4>
+      <small class="text-muted d-block mb-4">These values control how the pipeline flowchart calculates each stage. Changes take effect on the next page load.</small>
+
+      <div class="mb-3">
+        <label for="ps-min-turns" class="form-label fw-semibold">Minimum Turns</label>
+        <input type="number" class="form-control" id="ps-min-turns" min="1" max="200" value="{{ pipeline_settings.min_turns }}">
+        <div class="form-text">Dialogues with fewer turns are excluded as test/unmeaningful.</div>
+      </div>
+
+      <div class="mb-3">
+        <label for="ps-min-reviews" class="form-label fw-semibold">Minimum Reviews Required</label>
+        <input type="number" class="form-control" id="ps-min-reviews" min="1" max="10" value="{{ pipeline_settings.min_reviews_required }}">
+        <div class="form-text">Number of reviews needed before checking the rating threshold.</div>
+      </div>
+
+      <div class="mb-3">
+        <label for="ps-rating-threshold" class="form-label fw-semibold">Rating Threshold</label>
+        <input type="number" class="form-control" id="ps-rating-threshold" min="1" max="5" step="0.1" value="{{ pipeline_settings.rating_threshold }}">
+        <div class="form-text">Average rating required to count as "Rating Reached".</div>
+      </div>
+
+      <button type="button" class="btn btn-primary" id="ps-save-btn">
+        <span class="ps-save-label">Save Settings</span>
+        <span class="ps-save-spinner d-none"><span class="spinner-border spinner-border-sm me-1"></span>Saving...</span>
+      </button>
+      <span id="ps-save-status" class="ms-2 small"></span>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Reviewer/Dialogue Modal -->
+  <div class="modal fade" id="reviewerReviewsModal" tabindex="-1" aria-labelledby="reviewerReviewsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-scrollable">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="reviewerReviewsModalLabel">Reviewer Dialogues</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body">
+          <div id="reviewerReviewsLoading" class="text-center py-4 d-none">
+            <div class="spinner-border text-primary" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+          </div>
+          <div id="reviewerReviewsContent"></div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="modal fade" id="userGraphModal" tabindex="-1" aria-labelledby="userGraphModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-xl">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title" id="userGraphModalLabel">Activity Trends</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+        </div>
+        <div class="modal-body user-graph-modal-body">
+          <p class="text-muted mb-3" id="userGraphWeekRange"></p>
+          <div class="d-flex flex-wrap align-items-center gap-2 mb-3">
+            <div class="btn-group btn-group-sm" role="group" id="userGraphRangeControls">
+              <button type="button" class="btn btn-primary" data-graph-range="week">This Week</button>
+              <button type="button" class="btn btn-outline-primary" data-graph-range="month">This Month</button>
+              <button type="button" class="btn btn-outline-primary" data-graph-range="all">All Time</button>
+            </div>
+          </div>
+          <div class="row g-3 mb-3" id="userGraphTargets">
+            <div class="col-md-6">
+              <div class="d-flex align-items-center gap-2 target-status">
+                <i class="bi bi-square text-muted" id="dialogueTargetIcon"></i>
+                <span id="dialogueTargetText">Dialogues this week: - / 2</span>
+              </div>
+            </div>
+            <div class="col-md-6">
+              <div class="d-flex align-items-center gap-2 target-status">
+                <i class="bi bi-square text-muted" id="reviewTargetIcon"></i>
+                <span id="reviewTargetText">Reviews this week: - / 5</span>
+              </div>
+            </div>
+          </div>
+          <div class="graph-chart-wrapper" id="userGraphCanvasWrapper">
+            <canvas id="userTrendChart"></canvas>
+          </div>
+          <div id="userGraphLoading" class="text-center py-4 d-none">
+            <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div>
+          </div>
+          <div id="userGraphError" class="alert alert-danger d-none mt-3"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+  {{ super() }}
+  {% if include_chart_js is not defined or include_chart_js %}
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  {% endif %}
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script id="statsPayload" type="application/json">
+{{ {
+  "teamLabels": team_labels | default([]),
+  "dialoguesData": dialogues_data | default([]),
+  "reviewsData": reviews_data | default([]),
+  "ratingsData": ratings_data | default([]),
+  "timelineLabels": timeline | default([]) | map(attribute='date') | list,
+  "timelineDialogues": timeline | default([]) | map(attribute='dialogues') | list,
+  "timelineReviews": timeline | default([]) | map(attribute='reviews') | list,
+  "pipelineValues": [
+    pipeline_flow.v1_completed | default(0),
+    pipeline_flow.v1_review_1 | default(0),
+    pipeline_flow.v1_review_2 | default(0),
+    pipeline_flow.v1_rating_reached | default(0),
+    pipeline_flow.v1_edit_completed | default(0),
+    pipeline_flow.v2_review_1 | default(0),
+    pipeline_flow.v2_review_2 | default(0),
+    pipeline_flow.v2_rating_reached | default(0),
+    pipeline_flow.v2_edit_completed | default(0),
+    pipeline_flow.v3_review_1 | default(0),
+    pipeline_flow.v3_review_2 | default(0),
+    pipeline_flow.v3_rating_reached | default(0),
+    pipeline_flow.rating_not_reached | default(0)
+  ],
+  "selectedTab": initial_tab or 'users'
+} | tojson }}
+  </script>
+  <script src="{{ url_for('static', filename='js/stats.js') }}"></script>
+{% endblock %}
